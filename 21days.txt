@@ -1,0 +1,219 @@
+pragma solidity ^0.4.23;
+
+library SafeMath {
+
+  /**
+  * @dev Multiplies two numbers, throws on overflow.
+  */
+  function mul(uint256 a, uint256 b) internal pure returns (uint256) {
+    if (a == 0) {
+      return 0;
+    }
+    uint256 c = a * b;
+    assert(c / a == b);
+    return c;
+  }
+
+  /**
+  * @dev Integer division of two numbers, truncating the quotient.
+  */
+  function div(uint256 a, uint256 b) internal pure returns (uint256) {
+    // assert(b > 0); // Solidity automatically throws when dividing by 0
+    uint256 c = a / b;
+    // assert(a == b * c + a % b); // There is no case in which this doesn't hold
+    return c;
+  }
+
+  /**
+  * @dev Substracts two numbers, throws on overflow (i.e. if subtrahend is greater than minuend).
+  */
+  function sub(uint256 a, uint256 b) internal pure returns (uint256) {
+    assert(b <= a);
+    return a - b;
+  }
+
+  /**
+  * @dev Adds two numbers, throws on overflow.
+  */
+  function add(uint256 a, uint256 b) internal pure returns (uint256) {
+    uint256 c = a + b;
+    assert(c >= a);
+    return c;
+  }
+}
+
+contract beBetter  {
+    using SafeMath for uint256;
+    uint public pledge = 100000000;
+    //Keep the loser's deposit
+    uint public pond = 0;
+    //keep the winner's count
+    uint public numberOfVictory = 0;
+    
+    event DailyRecord(uint indexed promiseId, address indexed player,uint8 num, string record, uint time);
+    event AwardRecord(address indexed player, uint winNum, uint fee, uint time);
+    event PunishRecord(address indexed player, uint promiseId, uint time);
+    struct promise {
+        uint deposit;
+        uint startTime;
+        uint8 recordNum;
+        string target;
+    }
+    
+    promise[] public promises;
+    
+    mapping (uint => address) public promiseToOwner;
+    mapping (address => uint) public playerWinCount;
+    mapping(address => bool) public ifPromise;
+    //Record the time of receiving the award
+    mapping(address => uint) public awardTime;
+    
+    address public owner;
+
+  event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
+
+  /**
+   * @dev The Ownable constructor sets the original `owner` of the contract to the sender
+   * account.
+   */
+ constructor() public {
+     owner = msg.sender;
+ }
+
+  /**
+   * @dev Throws if called by any account other than the owner.
+   */
+  modifier onlyOwner() {
+    require(msg.sender == owner);
+    _;
+  }
+
+
+  /**
+   * @dev Allows the current owner to transfer control of the contract to a newOwner.
+   * @param newOwner The address to transfer ownership to.
+   */
+  function transferOwnership(address newOwner) public onlyOwner {
+    require(newOwner != address(0));
+    emit OwnershipTransferred(owner, newOwner);
+    owner = newOwner;
+  }
+    
+    // begin a promise
+    function startPromise(string _target) external payable {
+        require(msg.value == pledge);
+        require(ifPromise[msg.sender] != true);
+        uint id = promises.push(promise(msg.value, now, 0, _target)) - 1;
+        promiseToOwner[id] = msg.sender;
+        ifPromise[msg.sender] = true;
+    }
+    
+    //When the amount is unreasonable,designer can change the pledge
+  function setPledge(uint _fee) external onlyOwner {
+    pledge = _fee;
+  }
+  //Used to restrict only the initiator
+  modifier onlyOwnerOf(uint _promiseId) {
+    require(msg.sender == promiseToOwner[_promiseId]);
+    _;
+  }
+
+  //The daily record
+  function record(uint _promiseId, string _record) external onlyOwnerOf(_promiseId) {
+    require(bytes(_record).length > 59);
+    require(myPromise.recordNum < 21);
+    promise storage myPromise = promises[_promiseId];
+    uint oneDay = 1 days;
+    require(myPromise.startTime + myPromise.recordNum * oneDay < now && myPromise.startTime + (myPromise.recordNum + 1) * oneDay > now);
+    
+    myPromise.recordNum ++;
+    emit DailyRecord(_promiseId, msg.sender, myPromise.recordNum, _record, now);
+    if(myPromise.recordNum == 21) {
+        //win,deposit refund,and 
+        msg.sender.transfer(myPromise.deposit);
+        //reset 
+        ifPromise[msg.sender] = false;
+        numberOfVictory ++;
+        if(playerWinCount[ msg.sender] < 1) {
+            playerWinCount[ msg.sender] = 1;
+        } else {
+            playerWinCount[ msg.sender] += 1;
+        }
+    }
+  }
+  
+  function bomb(uint _promiseId) external {
+      promise storage thePromise = promises[_promiseId];
+      uint oneDay = 1 days;
+      require(thePromise.recordNum < 21 && thePromise.startTime + (thePromise.recordNum + 1) * oneDay < now);
+      //popper get thePromise's 10% deposit
+      uint award = thePromise.deposit / 10;
+      msg.sender.transfer(award);
+      pond = pond.add(thePromise.deposit - award);
+      thePromise.deposit = 0;
+      ifPromise[promiseToOwner[_promiseId]] = false;
+  }
+  
+  function award() external {
+      //You can get it once a week
+      require(playerWinCount[msg.sender] > 0);
+      require(awardTime[msg.sender] + 7 days < now);
+      awardTime[msg.sender] = now;
+      //Depending on how many times you've done it/all number of victory
+      uint fee = pond*playerWinCount[ msg.sender]/numberOfVictory;
+      msg.sender.transfer(fee);
+      emit AwardRecord(msg.sender, playerWinCount[ msg.sender], fee , now);
+      pond = pond.sub(fee);
+  }
+  
+    
+    //Query by user
+  function getpromisesByOwner(address _owner) external view returns(uint[]) {
+    uint[] memory result = new uint[](promises.length);
+    uint counter = 0;
+    for (uint i = 0; i < promises.length; i++) {
+      if (promiseToOwner[i] == _owner) {
+        result[counter] = i;
+        counter++;
+      }
+    }
+    return result;
+  }
+  
+  function getpromisesNum() external view returns(uint) {
+    return promises.length;
+  }
+  
+  //get promises use record number
+  function getOthersPromise(uint8 _recordNum) external view returns(uint[]) {
+    uint[] memory result = new uint[](promises.length);
+    uint counter = 0;
+    for (uint i = 0; i < promises.length; i++) {
+      if ( promiseToOwner[i] != msg.sender && promises[i].recordNum <= _recordNum && promises[i].deposit > 0) {
+        result[counter] = i;
+        counter++;
+      }
+    }
+    return result;
+  }
+  
+  //get All Win Promise
+  function getAllWinPromise() external view returns(uint[]) {
+    uint[] memory result = new uint[](promises.length);
+    uint counter = 0;
+    for (uint i = 0; i < promises.length; i++) {
+      if ( promises[i].recordNum == 21) {
+        result[counter] = i;
+        counter++;
+      }
+    }
+    return result;
+  }
+  
+  // only owner,can punish those destroyer
+  function closeBad(address _player, uint _promiseId) public onlyOwner {
+    require(_player != address(0));
+    awardTime[_player] = now + 10000 days;
+    emit PunishRecord(_player, _promiseId, now);
+  }
+}
